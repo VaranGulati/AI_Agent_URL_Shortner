@@ -131,3 +131,26 @@ Every orchestrator execution creates a state directory in `runs/run_<run_uuid>/`
   - **Success Rate**: Successful runs vs. Total runs.
   - **MTTR (Mean Time to Recovery)**: Delay between a fail event and subsequent recovery.
   - **E2E Latency**: Time elapsed from `Requirements` start to `ReleaseReadiness` end.
+
+---
+
+## 🔬 Testing Approach, Limitations & Trade-offs
+
+### 1. Testing Approach
+- **Orchestrator Validation Gates**: The orchestrator protects the target product code using an AST-based syntax validator before writing any files. If validation fails, it routes execution back to the implementation stage with the syntax errors injected as feedback, allowing the model to self-heal.
+- **Product Test Isolation**: Product unit tests run in isolation using a file-based SQLite database (`test.db`) that is generated and cleanly deleted after the test session to avoid dirty testing state.
+
+### 2. Limitations & Trade-offs
+- **In-Memory Rate Limiting**:
+  - *Trade-off*: Implemented an in-memory sliding window rate limiter in [`main.py`](file:///c:/Users/varan/Projects/AI_Agent_URL_Shortner/product/app/main.py) for simplicity, performance, and keeping zero external dependencies.
+  - *Limitation*: Application restarts clear all rate limit counters. It does not scale horizontally. In a multi-instance production environment, a Redis-backed rate limiter is required.
+- **SQLite Database**:
+  - *Trade-off*: SQLite is lightweight, serverless, and perfect for a lean URL shortener where read performance (redirection lookup) is dominant.
+  - *Limitation*: Under heavy concurrent write operations (e.g. bulk URL shortening), SQLite will suffer from write-locking. A transition to PostgreSQL is advised for high-throughput production.
+- **LLM Token & Rate Limits (TPM)**:
+  - *Trade-off*: To operate within the 8,000 TPM limit of Groq/openai APIs during code generation, the orchestrator spaces task loops with 15-second delays and prompts the Design/Decomposition nodes to consolidate code changes into at most 2 files.
+  - *Limitation*: While highly cost-effective and safe against rate limits, it increases the end-to-end execution latency of the orchestrator.
+
+### 3. Engineering Decisions & Judgments
+- **Simplified Settings wrapper**: Replaced complex Pydantic `BaseSettings` configurations with a native Python settings wrapper. This avoids version conflict imports (Pydantic V1 vs V2 migration bugs) while maintaining identical functionality.
+- **SSRF / Loopback Protection**: Rather than just validating URL syntax, the shortener resolves target hostnames to block localhost and private IPv4 ranges (10.x, 192.168.x, 172.16-31.x). This prevents malicious users from utilizing the shortener to run Server-Side Request Forgery (SSRF) attacks against internal endpoints.
