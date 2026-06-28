@@ -58,22 +58,37 @@ pip install -e .
 
 ---
 
-### 2. Run the Orchestrator
+### 2. Run the Orchestrator Scenarios
 
-#### **A. Run in Mock Mode (No API keys required)**
-To verify the SDLC DAG states and CLI human approval triggers:
-```bash
-python -m orchestrator.main --requirement "Build a minimal lean URL shortener API with FastAPI that saves to SQLite"
-```
-
-#### **B. Run in Production Mode (Using Groq API)**
-Ensure your Groq API key is set in your environment:
+Before running, if you want to use the real LLM (Groq API) instead of Mock mode, configure your API credentials in your environment:
 ```powershell
 $env:QROQ_API_KEY="your_groq_api_key"
 $env:QROQ_BASE_URL="https://api.groq.com/openai/v1"
-
-python -m orchestrator.main --requirement "Build a minimal lean URL shortener API with FastAPI that saves to SQLite"
 ```
+
+#### **Scenario A: Greenfield (Build New Service)**
+Generates the base URL shortener service from scratch.
+* **Mock Mode (No API keys required)**:
+  ```bash
+  python -m orchestrator.main --scenario "greenfield" --requirement "Build a minimal lean URL shortener API with FastAPI that saves to SQLite"
+  ```
+* **Groq Production Mode**:
+  ```bash
+  # Ensure QROQ_API_KEY is set
+  python -m orchestrator.main --scenario "greenfield" --requirement "Build a minimal lean URL shortener API with FastAPI that saves to SQLite"
+  ```
+
+#### **Scenario B: Brownfield (Enhance Existing Service)**
+Adds redirection analytics tracking and the stats endpoint on top of the existing codebase.
+* **Mock Mode (No API keys required)**:
+  ```bash
+  python -m orchestrator.main --scenario "brownfield" --requirement "Enhance the existing URL shortener to track redirection usage. Add a clicks counter to the URLMap database model. For every redirect, increment the counter. Expose a new API endpoint GET /analytics/{code} returning the target URL and total clicks."
+  ```
+* **Groq Production Mode**:
+  ```bash
+  # Ensure QROQ_API_KEY is set
+  python -m orchestrator.main --scenario "brownfield" --requirement "Enhance the existing URL shortener to track redirection usage. Add a clicks counter to the URLMap database model. For every redirect, increment the counter. Expose a new API endpoint GET /analytics/{code} returning the target URL and total clicks."
+  ```
 
 ---
 
