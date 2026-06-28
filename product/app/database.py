@@ -1,29 +1,26 @@
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker, declarative_base
+from sqlmodel import SQLModel, create_engine, Session
+from .config import settings
 
-DATABASE_URL = "sqlite:///./shortener.db"
-
+# Create the engine using the database URL from the Settings instance
 engine = create_engine(
-    DATABASE_URL,
-    connect_args={"check_same_thread": False}  # Required for SQLite with multithreading
+    settings.database_url,
+    echo=False,
+    connect_args={"check_same_thread": False},  # Required for SQLite with multiple threads
 )
 
-SessionLocal = sessionmaker(
-    autocommit=False,
-    autoflush=False,
-    bind=engine,
-)
 
-Base = declarative_base()
-
-
-def get_db():
-    """Dependency that provides a database session and ensures its closure."""
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
+def get_session():
+    """
+    FastAPI dependency that provides a SQLModel Session per request.
+    It uses a context manager to ensure the session is properly closed.
+    """
+    with Session(engine) as session:
+        yield session
 
 
-__all__ = ["engine", "SessionLocal", "Base", "get_db"]
+def init_db() -> None:
+    """
+    Helper that creates all tables defined by SQLModel models.
+    Typically called during application startup.
+    """
+    SQLModel.metadata.create_all(engine)

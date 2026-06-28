@@ -1,107 +1,44 @@
-# app/__init__.py
+from fastapi import FastAPI
+from pydantic import BaseModel
 
-# (empty file)
+from .config import settings
 
+from sqlmodel import SQLModel, Session, create_engine, select
+from .models import URLMapping  # Import model so SQLModel registers it
 
-# app/database.py
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker, declarative_base
-
-DATABASE_URL = "sqlite:///./shortener.db"
-
-engine = create_engine(
-    DATABASE_URL, connect_args={"check_same_thread": False}
-)
-SessionLocal = sessionmaker(bind=engine, autocommit=False, autoflush=False)
-
-Base = declarative_base()
-
-
-# app/models.py
-from sqlalchemy import Column, Integer, String
-from .database import Base
-
-
-class URLMap(Base):
-    __tablename__ = "url_maps"
-
-    id = Column(Integer, primary_key=True, index=True)
-    code = Column(String(10), unique=True, index=True, nullable=False)
-    target = Column(String, nullable=False)
-
-
-# app/schemas.py
-from pydantic import BaseModel, HttpUrl
-
-
-class CreateRequest(BaseModel):
-    url: HttpUrl
-
-
-class CreateResponse(BaseModel):
-    short_code: str
-    short_url: str
-
-
-# app/main.py
-from fastapi import FastAPI, HTTPException, Depends, Request
-from fastapi.responses import RedirectResponse
-from sqlalchemy.orm import Session
-from sqlalchemy import select
-import string
-import random
-
-from .database import SessionLocal, engine, Base
-from .schemas import CreateRequest, CreateResponse
-
-# Create tables
-Base.metadata.create_all(bind=engine)
-
-app = FastAPI(title="FastAPI URL Shortener")
+# ------------------------------
+# Database setup
+# ------------------------------
+engine = create_engine(settings.database_url, echo=False)
 
 
 def get_db():
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
+    with Session(engine) as session:
+        yield session
 
 
-def generate_code(length: int = 6) -> str:
-    chars = string.ascii_letters + string.digits
-    return "".join(random.choice(chars) for _ in range(length))
+def init_db():
+    """Create tables on startup."""
+    SQLModel.metadata.create_all(engine)
 
 
-@app.post("/shorten", response_model=CreateResponse)
-def create_short_url(payload: CreateRequest, db: Session = Depends(get_db)):
-    # Ensure the generated code is unique
-    for _ in range(10):
-        code = generate_code()
-        exists = db.execute(select(URLMap).where(URLMap.code == code)).first()
-        if not exists:
-            break
-    else:
-        raise HTTPException(status_code=500, detail="Could not generate a unique short code")
+# ------------------------------
+# Import routers (they rely on `get_session` and `BASE_URL`)
+# ------------------------------
+from .routers.shortener import shortener_router
+from .routers.analytics import analytics_router
 
-    mapping = URLMap(code=code, target=str(payload.url))
-    db.add(mapping)
-    db.commit()
-    db.refresh(mapping)
-
-    short_path = app.url_path_for("redirect", code=mapping.code)
-    return CreateResponse(short_code=mapping.code, short_url=short_path)
+# ------------------------------
+# FastAPI application
+# ------------------------------
+app = FastAPI(title="Lean URL Shortener with Analytics")
 
 
-@app.get("/{code}", name="redirect")
-def redirect(code: str, db: Session = Depends(get_db)):
-    result = db.execute(select(URLMap).where(URLMap.code == code)).scalar_one_or_none()
-    if not result:
-        raise HTTPException(status_code=404, detail="Short URL not found")
-    return RedirectResponse(url=result.target)
+@app.on_event("startup")
+async def on_startup():
+    init_db()
 
 
-if __name__ == "__main__":
-    import uvicorn
-
-    uvicorn.run("app.main:app", host="0.0.0.0", port=8000, reload=True)
+# Register routers
+app.include_router(shortener_router)
+app.include_router(analytics_router)

@@ -80,7 +80,16 @@ def design_node(state: dict):
     logger.log_event("Design", "START")
     start_t = time.time()
     
-    prompt = f"Design a lean FastAPI URL shortener for this requirement: {state['requirements']}. Output JSON with 'components' array."
+    prompt = (
+        f"Design the architecture changes for this requirement: {state['requirements']}.\n"
+        f"Output your design strictly in JSON format. Do not write any conversational text before or after the JSON.\n"
+        f"Example JSON structure:\n"
+        f"{{\n"
+        f"  \"components\": [\n"
+        f"    {{\"name\": \"Database Schema\", \"description\": \"Add a clicks column to URLMap\", \"filename\": \"app/main.py\"}}\n"
+        f"  ]\n"
+        f"}}\n"
+    )
     mock_resp = '{"components": ["app/main.py", "app/database.py"]}'
     
     res = invoke_agent("You are a Software Architect.", prompt, mock_resp)
@@ -89,6 +98,9 @@ def design_node(state: dict):
     
     passed, msg = check_design_exit(parsed)
     if not passed:
+        print(f"\n[DEBUG] Design Failed Exit Check.")
+        print(f"Raw LLM Response:\n{res}\n")
+        print(f"Parsed Object: {parsed}\n")
         logger.log_event("Design", "FAIL", duration_ms=duration, error_msg=msg)
         state["errors"].append(f"Design Exit Failed: {msg}")
     else:
@@ -136,33 +148,96 @@ def implementation_node(state: dict):
     start_t = time.time()
     
     code_dict = {}
+    feedback = state.get("gate_feedback", "")
     for task in state["tasks"]:
-        prompt = f"Write Python code for this task: {task['description']}. Context: {json.dumps(state['architecture'])}. ONLY output the raw code, no markdown wrappers."
+        prompt = f"Write Python code for this task: {task['description']}. Context: {json.dumps(state['architecture'])}."
+        if feedback:
+            prompt += f"\nNOTE: The previous code generation attempt failed validation check with this error: {feedback}. Please correct the code to resolve this issue."
+        prompt += "\nONLY output the raw code, no markdown wrappers."
         mock_code = f"# Mock implementation for {task['filename']}\nprint('hello')\n"
         
         res = invoke_agent("You are a Senior Python Developer.", prompt, mock_code)
         # Clean up markdown if llm ignored instructions
         res = res.replace("```python", "").replace("```", "").strip()
         code_dict[task["filename"]] = res
+        time.sleep(1.0)
 
     duration = int((time.time() - start_t) * 1000)
     
     passed, msg = check_implementation_exit(code_dict)
     if not passed:
-        logger.log_event("Implementation", "FAIL", duration_ms=duration, error_msg=msg)
-        state["errors"].append(f"Implementation Exit Failed: {msg}")
+        retries = state.get("retry_count", 0)
+        if retries < 3:
+            state["retry_count"] = retries + 1
+            state["gate_feedback"] = msg
+            logger.log_event("Implementation", "RETRY", duration_ms=duration, error_msg=msg)
+            print(f"\n[ORCHESTRATOR] Implementation validation failed. Retrying (Attempt {state['retry_count']}/3)...")
+        else:
+            logger.log_event("Implementation", "FAIL", duration_ms=duration, error_msg=msg)
+            state["errors"].append(f"Implementation Exit Failed after 3 retries: {msg}")
     else:
         state["implementation_code"] = code_dict
+        state["gate_feedback"] = ""
+        state["retry_count"] = 0
+        state["errors"] = [e for e in state.get("errors", []) if "Implementation Exit Failed" not in e]
         logger.log_event("Implementation", "SUCCESS", duration_ms=duration)
         
     return state
+
+def generate_stub(code: str) -> str:
+    """Uses AST to extract class fields and function/endpoint signatures, stripping function bodies to fit token limits."""
+    try:
+        import ast
+        tree = ast.parse(code)
+        stub_lines = []
+        for node in tree.body:
+            if isinstance(node, ast.ClassDef):
+                decorators = "".join([f"@{ast.unparse(d)}\n" for d in node.decorator_list])
+                stub_lines.append(f"{decorators}class {node.name}:")
+                has_body = False
+                for body_node in node.body:
+                    if isinstance(body_node, ast.AnnAssign):  # Pydantic fields / typed attributes
+                        stub_lines.append(f"    {ast.unparse(body_node)}")
+                        has_body = True
+                    elif isinstance(body_node, ast.FunctionDef):  # Class methods
+                        method_decs = "".join([f"    @{ast.unparse(d)}\n" for d in body_node.decorator_list])
+                        args = ast.unparse(body_node.args)
+                        stub_lines.append(f"{method_decs}    def {body_node.name}({args}): ...")
+                        has_body = True
+                if not has_body:
+                    stub_lines.append("    pass")
+                stub_lines.append("")
+            elif isinstance(node, ast.FunctionDef):
+                decorators = "".join([f"@{ast.unparse(d)}\n" for d in node.decorator_list])
+                args = ast.unparse(node.args)
+                stub_lines.append(f"{decorators}def {node.name}({args}): ...\n")
+        return "\n".join(stub_lines)
+    except Exception:
+        # Fallback to truncation if AST parsing fails
+        return code[:800] + "\n... [TRUNCATED due to token limits] ..."
 
 def testing_node(state: dict):
     logger = MetricsLogger(state["run_id"])
     logger.log_event("Testing", "START")
     start_t = time.time()
     
-    prompt = f"Write a Pytest test suite for these files: {json.dumps(list(state['implementation_code'].keys()))}. Output raw python code."
+    # Construct stubbed code context for the testing agent to fit the 8000 token limit
+    code_context = ""
+    for fname, code in state.get("implementation_code", {}).items():
+        if fname.endswith(".py"):
+            stubbed = generate_stub(code)
+            code_context += f"\n\n# --- Stubbed File: {fname} ---\n{stubbed}\n"
+        else:
+            # Exclude non-python files from context to save tokens
+            pass
+        
+    prompt = (
+        f"Write a Pytest test suite using FastAPI's TestClient to test the following generated code.\n"
+        f"Strictly only use imports, models, database sessions, and endpoints defined in the code below. "
+        f"Do not assume any external config modules, sqlmodel, or auth systems unless they exist in the code below.\n"
+        f"Generated Code Context (Signatures & Stubs):{code_context}\n\n"
+        f"ONLY output the raw python code for the test suite, no markdown block wrappers."
+    )
     mock_code = "def test_mock(): assert True\n"
     
     res = invoke_agent("You are an SDET.", prompt, mock_code)

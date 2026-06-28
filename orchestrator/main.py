@@ -32,6 +32,7 @@ def main():
         "docs": {},
         "errors": [],
         "gate_feedback": "",
+        "retry_count": 0,
         "current_stage": "Requirements",
         "db_path": "sqlite:///runs/state.sqlite"
     }

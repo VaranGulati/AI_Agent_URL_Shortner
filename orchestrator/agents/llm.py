@@ -18,10 +18,13 @@ def get_llm():
         )
     return None
 
+import time
+
 def invoke_agent(system_prompt: str, user_prompt: str, mock_response: str) -> str:
     """
     Invokes the LLM. If no API key is provided, returns the mock_response 
     to preserve the 30 requests/day limit during development.
+    Includes rate-limit retry logic with exponential backoff.
     """
     llm = get_llm()
     if llm:
@@ -29,8 +32,24 @@ def invoke_agent(system_prompt: str, user_prompt: str, mock_response: str) -> st
             SystemMessage(content=system_prompt),
             HumanMessage(content=user_prompt)
         ]
-        response = llm.invoke(messages)
-        return response.content
+        
+        max_rate_limit_retries = 4
+        backoff_seconds = 3.0
+        
+        for attempt in range(max_rate_limit_retries):
+            try:
+                response = llm.invoke(messages)
+                return response.content
+            except Exception as e:
+                err_str = str(e).lower()
+                is_rate_limit = "rate_limit" in err_str or "429" in err_str
+                
+                if is_rate_limit and attempt < max_rate_limit_retries - 1:
+                    print(f"\n[Rate Limit] 429 hit. Sleeping for {backoff_seconds}s before retry... (Attempt {attempt + 1}/{max_rate_limit_retries})")
+                    time.sleep(backoff_seconds)
+                    backoff_seconds *= 2
+                else:
+                    raise e
     else:
         print("[MOCK LLM] Returning mock response to save API quota.")
         return mock_response

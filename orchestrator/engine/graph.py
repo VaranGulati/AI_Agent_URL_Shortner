@@ -35,10 +35,17 @@ def build_graph():
             return "Pass"
         return "Fail"
         
+    def check_implementation_result(state):
+        if state.get("errors"):
+            return "Fail"
+        if state.get("gate_feedback"):
+            return "Retry"
+        return "Pass"
+        
     workflow.add_conditional_edges("Requirements", check_errors, {"Pass": "Design", "Fail": END})
     workflow.add_conditional_edges("Design", check_errors, {"Pass": "Decomposition", "Fail": END})
     workflow.add_conditional_edges("Decomposition", check_design_approval, {"Pass": "Implementation", "Fail": END})
-    workflow.add_conditional_edges("Implementation", check_errors, {"Pass": "Testing", "Fail": END})
+    workflow.add_conditional_edges("Implementation", check_implementation_result, {"Pass": "Testing", "Retry": "Implementation", "Fail": END})
     workflow.add_conditional_edges("Testing", check_errors, {"Pass": "ReleaseReadiness", "Fail": END})
     workflow.add_edge("ReleaseReadiness", END)
     

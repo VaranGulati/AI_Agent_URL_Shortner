@@ -1,4 +1,5 @@
 /.pytest_cache
 /.venv
 /ai_agent_url_shortener.egg-info
-/runs
+runs/
+**/__pycache__/

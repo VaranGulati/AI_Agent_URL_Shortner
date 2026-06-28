@@ -68,5 +68,6 @@ class GraphState(TypedDict):
     docs: Dict[str, str]
     errors: List[str]
     gate_feedback: str
+    retry_count: int
     current_stage: str
     db_path: str
