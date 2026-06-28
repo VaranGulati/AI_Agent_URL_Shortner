@@ -90,6 +90,18 @@ Adds redirection analytics tracking and the stats endpoint on top of the existin
   python -m orchestrator.main --scenario "brownfield" --requirement "Enhance the existing URL shortener to track redirection usage. Add a clicks counter to the URLMap database model. For every redirect, increment the counter. Expose a new API endpoint GET /analytics/{code} returning the target URL and total clicks."
   ```
 
+#### **Scenario C: Ambiguous (Interpret and Resolve)**
+Provides a vague requirement (e.g. *"make safety better"* and *"make redirects dynamic"*) to demonstrate how the orchestrator PM agent identifies, resolves, and documents ambiguity automatically.
+* **Mock Mode (No API keys required)**:
+  ```bash
+  python -m orchestrator.main --scenario "ambiguous" --requirement "Improve URL shortener backend safety and redirect features. We want to protect it but we also want the redirects to be dynamic and fast."
+  ```
+* **Groq Production Mode**:
+  ```bash
+  # Ensure QROQ_API_KEY is set
+  python -m orchestrator.main --scenario "ambiguous" --requirement "Improve URL shortener backend safety and redirect features. We want to protect it but we also want the redirects to be dynamic and fast."
+  ```
+
 ---
 
 ### 3. Run and Test the Generated URL Shortener

@@ -1,5 +1,7 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
+import time
 
 from .config import settings
 
@@ -32,6 +34,27 @@ from .routers.analytics import analytics_router
 # FastAPI application
 # ------------------------------
 app = FastAPI(title="Lean URL Shortener with Analytics")
+
+# Simple in-memory rate limiter for backend safety
+RATE_LIMIT_LIMIT = 5 # requests
+RATE_LIMIT_WINDOW = 60 # seconds
+ip_requests = {}
+
+@app.middleware("http")
+async def rate_limit_middleware(request: Request, call_next):
+    # Only rate limit url shortening creations for security
+    if request.url.path == "/shorten" and request.method == "POST":
+        client_ip = request.client.host if request.client else "127.0.0.1"
+        now = time.time()
+        # Filter request timestamps older than window
+        ip_requests[client_ip] = [t for t in ip_requests.get(client_ip, []) if now - t < RATE_LIMIT_WINDOW]
+        
+        if len(ip_requests[client_ip]) >= RATE_LIMIT_LIMIT:
+            return JSONResponse(status_code=429, content={"detail": "Rate limit exceeded. Try again in a minute."})
+            
+        ip_requests[client_ip].append(now)
+        
+    return await call_next(request)
 
 
 @app.on_event("startup")

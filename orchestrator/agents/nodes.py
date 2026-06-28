@@ -58,8 +58,16 @@ def requirements_node(state: dict):
         state["errors"].append(f"Req Entry Failed: {msg}")
         return state
 
-    prompt = f"Analyze these requirements and output a clean JSON with 'problem_statement' and 'core_features' list. Reqs: {state['requirements']}"
-    mock_resp = '{"problem_statement": "Build a lean URL shortener API", "core_features": ["shorten URL", "redirect"]}'
+    prompt = (
+        f"You are a Product Manager analyzing an engineering requirement request.\n"
+        f"Identify any ambiguities or underspecified parts, and resolve them by proposing a sensible default engineering assumption.\n"
+        f"Output your analysis strictly in JSON format with three keys:\n"
+        f"  - 'problem_statement': A clear, normalized description of the task.\n"
+        f"  - 'core_features': A list of specific backend features to implement.\n"
+        f"  - 'ambiguities_resolved': A list of identified ambiguities and how you resolved them.\n\n"
+        f"Requirement Text:\n{state['requirements']}"
+    )
+    mock_resp = '{"problem_statement": "Build a secure URL shortener API", "core_features": ["shorten URL", "redirect", "rate limiting"], "ambiguities_resolved": ["Assumed safety refers to rate limiting, and dynamic redirects refers to custom short codes."]}'
     
     res = invoke_agent("You are an expert PM.", prompt, mock_resp)
     
@@ -68,6 +76,7 @@ def requirements_node(state: dict):
     
     if "problem_statement" in parsed:
         state["requirements"] = parsed["problem_statement"]
+        state["gate_feedback"] = json.dumps(parsed.get("ambiguities_resolved", []))
         logger.log_event("Requirements", "SUCCESS", duration_ms=duration)
     else:
         logger.log_event("Requirements", "FAIL", duration_ms=duration, error_msg="Invalid JSON")
@@ -82,6 +91,8 @@ def design_node(state: dict):
     
     prompt = (
         f"Design the architecture changes for this requirement: {state['requirements']}.\n"
+        f"Keep the architecture extremely minimal. Consolidated all logic into at most 2 files (e.g. app/main.py and app/database.py). "
+        f"Do not create separate service/router files. We must minimize token usage.\n"
         f"Output your design strictly in JSON format. Do not write any conversational text before or after the JSON.\n"
         f"Example JSON structure:\n"
         f"{{\n"
@@ -114,7 +125,7 @@ def decomposition_node(state: dict):
     logger.log_event("Decomposition", "START")
     start_t = time.time()
     
-    prompt = f"Decompose this architecture into coding tasks. Architecture: {json.dumps(state['architecture'])}. Output JSON list of objects with 'description' and 'filename'."
+    prompt = f"Decompose this architecture into coding tasks. Architecture: {json.dumps(state['architecture'])}. Output JSON list of objects with 'description' and 'filename'. Keep tasks consolidated to at most 2 core files."
     mock_resp = '{"tasks": [{"description": "Create FastAPI app", "filename": "app/main.py"}, {"description": "DB connection", "filename": "app/database.py"}]}'
     
     res = invoke_agent("You are an Engineering Manager.", prompt, mock_resp)
@@ -160,7 +171,7 @@ def implementation_node(state: dict):
         # Clean up markdown if llm ignored instructions
         res = res.replace("```python", "").replace("```", "").strip()
         code_dict[task["filename"]] = res
-        time.sleep(1.0)
+        time.sleep(15.0)
 
     duration = int((time.time() - start_t) * 1000)
     

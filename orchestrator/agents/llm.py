@@ -34,7 +34,7 @@ def invoke_agent(system_prompt: str, user_prompt: str, mock_response: str) -> st
         ]
         
         max_rate_limit_retries = 4
-        backoff_seconds = 3.0
+        backoff_seconds = 10.0
         
         for attempt in range(max_rate_limit_retries):
             try:

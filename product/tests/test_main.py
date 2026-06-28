@@ -74,3 +74,43 @@ def test_analytics(client, session):
 def test_analytics_not_found(client):
     response = client.get("/analytics/missing")
     assert response.status_code == 404
+
+def test_ssrf_validation(client):
+    # Try shortening localhost and local private IPs (SSRF protection)
+    response = client.post("/shorten", json={"original_url": "http://127.0.0.1"})
+    assert response.status_code == 400
+    assert "unsafe local space" in response.json()["detail"]
+
+    response = client.post("/shorten", json={"original_url": "http://localhost"})
+    assert response.status_code == 400
+
+def test_update_url(client, session):
+    # Setup mapping directly in DB
+    mapping = URLMapping(original_url="https://www.google.com", short_code="g")
+    session.add(mapping)
+    session.commit()
+
+    # Dynamically update redirection URL
+    response = client.patch("/g", json={"new_url": "https://www.wikipedia.org"})
+    assert response.status_code == 200
+    assert response.json()["target_url"] == "https://www.wikipedia.org/"
+
+    # Verify that requesting g now redirects to wikipedia
+    response2 = client.get("/g", follow_redirects=False)
+    assert response2.status_code == 307
+    assert response2.headers["location"] == "https://www.wikipedia.org/"
+
+def test_rate_limiter(client):
+    # Clean up rate limits history
+    from app.main import ip_requests
+    ip_requests.clear()
+
+    # Send 5 requests (Limit is 5)
+    for _ in range(5):
+        response = client.post("/shorten", json={"original_url": "https://www.google.com"})
+        assert response.status_code == 200
+
+    # 6th request must trigger rate limiter
+    response = client.post("/shorten", json={"original_url": "https://www.google.com"})
+    assert response.status_code == 429
+    assert "Rate limit exceeded" in response.json()["detail"]
